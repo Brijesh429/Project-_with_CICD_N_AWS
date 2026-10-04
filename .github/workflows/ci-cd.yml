@@ -1,0 +1,89 @@
+name: Build, test, and deploy to Tomcat
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test WAR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Run tests and package the WAR
+        run: ./mvnw --batch-mode --no-transfer-progress clean verify
+
+      - name: Save WAR for deployment
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-war
+          path: target/*.war
+          if-no-files-found: error
+          retention-days: 1
+
+  deploy:
+    name: Deploy to Tomcat
+    needs: build-and-test
+    # Pull requests validate the build but never deploy; only pushes to main/master do.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download WAR
+        uses: actions/download-artifact@v4
+        with:
+          name: application-war
+          path: dist
+
+      - name: Deploy WAR through Tomcat Manager
+        env:
+          TOMCAT_MANAGER_URL: ${{ secrets.TOMCAT_MANAGER_URL }}
+          TOMCAT_USER: ${{ secrets.TOMCAT_USER }}
+          TOMCAT_PASSWORD: ${{ secrets.TOMCAT_PASSWORD }}
+          TOMCAT_CONTEXT_PATH: ${{ vars.TOMCAT_CONTEXT_PATH || '/springboot' }}
+        run: |
+          set -euo pipefail
+
+          # Fail early when repository secrets or the deployment context are misconfigured.
+          : "${TOMCAT_MANAGER_URL:?Set the TOMCAT_MANAGER_URL repository secret}"
+          : "${TOMCAT_USER:?Set the TOMCAT_USER repository secret}"
+          : "${TOMCAT_PASSWORD:?Set the TOMCAT_PASSWORD repository secret}"
+          [[ "$TOMCAT_MANAGER_URL" == https://* ]] || {
+            echo "TOMCAT_MANAGER_URL must use HTTPS to protect deployment credentials." >&2
+            exit 1
+          }
+          [[ "$TOMCAT_CONTEXT_PATH" =~ ^/[A-Za-z0-9._-]+$ ]] || {
+            echo "TOMCAT_CONTEXT_PATH must be a context such as /springboot." >&2
+            exit 1
+          }
+
+          WAR_FILE="$(find dist -maxdepth 1 -type f -name '*.war' -print -quit)"
+          [[ -n "$WAR_FILE" ]] || {
+            echo "No WAR artifact was downloaded." >&2
+            exit 1
+          }
+
+          TOMCAT_MANAGER_URL="${TOMCAT_MANAGER_URL%/}"
+          RESPONSE="$(curl --silent --show-error --fail \
+            --user "$TOMCAT_USER:$TOMCAT_PASSWORD" \
+            --upload-file "$WAR_FILE" \
+            "$TOMCAT_MANAGER_URL/deploy?path=$TOMCAT_CONTEXT_PATH&update=true")"
+          echo "$RESPONSE"
+          [[ "$RESPONSE" == "OK -"* ]] || {
+            echo "Tomcat Manager reported a deployment failure." >&2
+            exit 1
+          }
