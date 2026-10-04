@@ -2,15 +2,19 @@ name: Build, test, and deploy to Tomcat
 
 on:
   push:
-    branches: [main, master]
+    # This is the branch currently published in the GitHub repository.
+    branches: [publish-main]
   pull_request:
-    branches: [main, master]
+    branches: [publish-main]
+  # Useful for a manual build; deployment is intentionally limited to a branch push.
   workflow_dispatch:
 
+# The workflow only reads source and uploads its generated WAR artifact.
 permissions:
   contents: read
 
 jobs:
+  # Compile, run tests, and package the app before any deployment is allowed.
   build-and-test:
     name: Build and test WAR
     runs-on: ubuntu-latest
@@ -28,6 +32,7 @@ jobs:
       - name: Run tests and package the WAR
         run: ./mvnw --batch-mode --no-transfer-progress clean verify
 
+      # Pass the tested WAR to the deploy job instead of rebuilding it.
       - name: Save WAR for deployment
         uses: actions/upload-artifact@v4
         with:
@@ -38,9 +43,9 @@ jobs:
 
   deploy:
     name: Deploy to Tomcat
+    # Do not deploy pull requests or manual runs; require a successful push to publish-main.
     needs: build-and-test
-    # Pull requests validate the build but never deploy; only pushes to main/master do.
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/publish-main'
     runs-on: ubuntu-latest
     steps:
       - name: Download WAR
@@ -49,6 +54,7 @@ jobs:
           name: application-war
           path: dist
 
+      # Credentials are stored as GitHub Actions secrets, never in the repository.
       - name: Deploy WAR through Tomcat Manager
         env:
           TOMCAT_MANAGER_URL: ${{ secrets.TOMCAT_MANAGER_URL }}

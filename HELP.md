@@ -3,9 +3,9 @@
 ## GitHub Actions deployment to Tomcat
 
 The workflow in `.github/workflows/ci-cd.yml` runs tests and creates a WAR on pushes
-and pull requests targeting `main` or `master`. It deploys only after a successful
-push to either branch. The manual **Run workflow** option also runs the build; it
-does not deploy unless triggered by a push.
+and pull requests targeting `publish-main`. It deploys only after a successful push
+to that branch. The manual **Run workflow** option runs the build but does not
+deploy.
 
 Configure these repository secrets under **Settings > Secrets and variables > Actions**:
 
@@ -22,6 +22,13 @@ Spring Boot 4.x).
 
 Set the `DB_PASSWORD` environment variable wherever the application runs. Database
 credentials should not be committed to source control.
+
+After adding the Tomcat secrets and configuring the Tomcat server, push a new commit
+to `publish-main`. Open the repository's **Actions** tab and select **Build, test,
+and deploy to Tomcat** to follow the build and deployment jobs. Once deployment
+succeeds, the welcome endpoint is available at
+`https://<your-tomcat-host>/springboot/api/welcome` (replace `/springboot` if you
+set a different `TOMCAT_CONTEXT_PATH`).
 
 ### Reference Documentation
 For further reference, please consider the following sections:
